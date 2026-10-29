@@ -463,6 +463,25 @@ export class GCSRepository implements StorageRepositoryInterface {
   }
 
   /**
+   * Creates a presigned (V4 signed) URL for uploading an object straight to its
+   * final key in one PUT, with no staged parts and no complete step.
+   */
+  async createPresignedUploadUrl(key: string, expiresIn: number = 3600): Promise<string> {
+    return withRetry(
+      async () => {
+        const [url] = await this.bucket.file(key).getSignedUrl({
+          version: 'v4',
+          action: 'write',
+          expires: Date.now() + expiresIn * 1000
+        });
+        return url;
+      },
+      this.retryOptions,
+      { operation: 'createPresignedUploadUrl', key, expiresIn }
+    );
+  }
+
+  /**
    * Gets the underlying GCS client
    */
   getClient(): Storage {
