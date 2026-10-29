@@ -1094,6 +1094,10 @@
                   },
                   "contentType": {
                     "type": "string"
+                  },
+                  "direct": {
+                    "type": "boolean",
+                    "description": "Single presigned PUT straight to the final key, no complete call (numParts must be 1)"
                   }
                 },
                 "required": [
@@ -1144,6 +1148,10 @@
                               "presignedUrl"
                             ]
                           }
+                        },
+                        "direct": {
+                          "type": "boolean",
+                          "description": "true for a direct upload: the single PUT writes the final object; do not call complete"
                         }
                       },
                       "required": [
@@ -1203,6 +1211,181 @@
           },
           "415": {
             "description": "Unsupported file type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/databanks/{databankId}/uploads/batch": {
+      "post": {
+        "tags": [
+          "Databanks"
+        ],
+        "summary": "Initiate several uploads to a databank in one request",
+        "description": "Initiates up to 100 uploads at once; each item takes the same fields as POST /databanks/{databankId}/uploads and gets the same result, in the same order. Saves one round trip per file when uploading many small files.\n\n**Access Control:**\n- Allowed Roles: `provider`",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Databank ID"
+            },
+            "required": true,
+            "description": "Databank ID",
+            "name": "databankId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "uploads": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "numParts": {
+                          "type": "number"
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "direct": {
+                          "type": "boolean",
+                          "description": "Single presigned PUT straight to the final key, no complete call (numParts must be 1)"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "numParts"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "uploads"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uploads initiated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "uploads": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "uploadId": {
+                                "type": "string"
+                              },
+                              "key": {
+                                "type": "string"
+                              },
+                              "parts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "partNumber": {
+                                      "type": "number"
+                                    },
+                                    "presignedUrl": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "partNumber",
+                                    "presignedUrl"
+                                  ]
+                                }
+                              },
+                              "direct": {
+                                "type": "boolean",
+                                "description": "true for a direct upload: the single PUT writes the final object; do not call complete"
+                              }
+                            },
+                            "required": [
+                              "uploadId",
+                              "key",
+                              "parts"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "uploads"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
             "content": {
               "application/json": {
                 "schema": {

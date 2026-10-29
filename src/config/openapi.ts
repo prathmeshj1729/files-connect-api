@@ -207,6 +207,20 @@ const UploadInitiationSchema = z.object({
       presignedUrl: z.string(),
     }),
   ),
+  direct: z
+    .boolean()
+    .optional()
+    .describe('true for a direct upload: the single PUT writes the final object; do not call complete'),
+});
+
+const UploadInitiationRequestSchema = z.object({
+  key: z.string(),
+  numParts: z.number(),
+  contentType: z.string().optional(),
+  direct: z
+    .boolean()
+    .optional()
+    .describe('Single presigned PUT straight to the final key, no complete call (numParts must be 1)'),
 });
 
 const UploadCompletionSchema = z.object({
@@ -622,11 +636,7 @@ registry.registerPath({
     body: {
       content: {
         'application/json': {
-          schema: z.object({
-            key: z.string(),
-            numParts: z.number(),
-            contentType: z.string().optional(),
-          }),
+          schema: UploadInitiationRequestSchema,
         },
       },
     },
@@ -650,6 +660,45 @@ registry.registerPath({
     },
     415: {
       description: 'Unsupported file type',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/databanks/{databankId}/uploads/batch',
+  tags: ['Databanks'],
+  summary: 'Initiate several uploads to a databank in one request',
+  description:
+    'Initiates up to 100 uploads at once; each item takes the same fields as POST /databanks/{databankId}/uploads and gets the same result, in the same order. Saves one round trip per file when uploading many small files.\n\n**Access Control:**\n- Allowed Roles: `provider`',
+  request: {
+    params: z.object({
+      databankId: z.string().describe('Databank ID'),
+    }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({ uploads: z.array(UploadInitiationRequestSchema).min(1).max(100) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Uploads initiated successfully',
+      content: {
+        'application/json': {
+          schema: SuccessResponseSchema(z.object({ uploads: z.array(UploadInitiationSchema) })),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid request',
       content: {
         'application/json': {
           schema: ErrorResponseSchema,

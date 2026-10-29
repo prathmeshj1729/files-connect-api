@@ -67,6 +67,14 @@ export interface MultipartUploadServiceInterface {
    */
   generatePresignedUrls(request: PresignedUrlRequest): Promise<PresignedUrlResponse>;
 
+  /**
+   * Returns one presigned PUT URL to the final key (no staged parts, no complete step)
+   * @param key - The file key
+   * @param databankId - The databank ID
+   * @returns Presigned upload URL
+   */
+  initiateDirectUpload(key: string, databankId: string): Promise<string>;
+
   // Removed unused finalizeMultipartUpload method
 }
 
@@ -153,6 +161,23 @@ export class MultipartUploadService implements MultipartUploadServiceInterface {
       uploadId: result.uploadId,
       presignedUrls: result.signedUrls
     };
+  }
+
+  /**
+   * Returns one presigned PUT URL to the final key (no staged parts, no complete step)
+   * @param key - The file key
+   * @param databankId - The databank ID
+   * @returns Presigned upload URL
+   */
+  async initiateDirectUpload(key: string, databankId: string): Promise<string> {
+    const fileTypeValidation = validateDatabankFileType(key);
+    if (!fileTypeValidation.isValid) {
+      throw new ValidationError(fileTypeValidation.reason || 'File type not allowed');
+    }
+    if (typeof this.storageRepository.createPresignedUploadUrl !== 'function') {
+      throw new ValidationError('Direct uploads are not supported by this storage provider');
+    }
+    return this.storageRepository.createPresignedUploadUrl(this.normalizeFileKey(key, databankId), 60 * 60 * 3);
   }
 
   /**

@@ -93,6 +93,19 @@ export const initiateUploadSchema = z.object({
   
   /** Content type of the file */
   contentType: z.string().optional(),
+
+  /** Single presigned PUT straight to the final key; no complete call (numParts must be 1) */
+  direct: z.boolean().optional(),
+}).refine(data => !data.direct || data.numParts === 1, {
+  message: 'Direct uploads must have numParts = 1',
+  path: ['numParts']
+});
+
+/**
+ * Schema for initiating several uploads in one request
+ */
+export const batchInitiateUploadSchema = z.object({
+  uploads: z.array(initiateUploadSchema).min(1).max(100),
 });
 
 const processingJobOptionsSchema = z.object({
@@ -159,6 +172,7 @@ export const completeUploadSchema = z.object({
       path: ['ETag']
     })
   ).min(1, 'At least one part is required'),
+
 });
 
 /**

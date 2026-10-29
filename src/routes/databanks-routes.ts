@@ -51,6 +51,7 @@ import {
   filePreviewSchema,
   fileMetadataSchema,
   initiateUploadSchema,
+  batchInitiateUploadSchema,
   completeUploadSchema,
   createProcessingJobSchema,
   updateProcessingJobStatusSchema,
@@ -366,11 +367,13 @@ databanksRoutes.post(
       // Determine the file type from the key or the specified format
       // Provide default if detectFileType returns null
       const detectedType = key ? fileService.detectFileType(key) : null;
-      const fileType = format || detectedType || FileTypes.JSON;
-      
-      if (!fileType) {
-        throw new ValidationError('Unsupported file type or format not specified');
+      // Unknown types used to fall back to JSON, which reads the whole object into
+      // memory: a 2 GiB .bin file OOM-killed the pod. Answer "no preview" instead.
+      if (!format && !detectedType) {
+        res.json(buildResponse({ content: null, format: null, previewSupported: false, truncated: false }));
+        return;
       }
+      const fileType = format || detectedType;
       
       // Generate the preview
       // Generate preview with proper options object
@@ -420,6 +423,68 @@ databanksRoutes.post(
 //=============================================================================
 
 /**
+ * Initiates one upload: multipart (presigned URL per part, then complete) or,
+ * with `direct`, a single presigned PUT to the final key and no complete call.
+ */
+async function initiateOneUpload(
+  databankId: string,
+  body: { key: string; numParts: number; contentType?: string; direct?: boolean }
+) {
+  const { key, numParts, contentType, direct } = body;
+  if (!key) {
+    throw new ValidationError('Key is required');
+  }
+
+  let result: { uploadId: string; key: string; parts: { partNumber: number; presignedUrl: string }[]; direct?: boolean };
+  if (direct) {
+    const presignedUrl = await multipartUploadService.initiateDirectUpload(key, databankId);
+    result = { uploadId: 'direct', key, parts: [{ partNumber: 1, presignedUrl }], direct: true };
+  } else {
+    const { uploadId, presignedUrls } = await multipartUploadService.initiateUpload(
+      key,
+      databankId,
+      numParts,
+      contentType || 'application/octet-stream' // Provide default content type if undefined
+    );
+    // Format the response with presigned URLs for each part
+    const parts = presignedUrls.map((url, index) => ({
+      partNumber: index + 1,
+      presignedUrl: url
+    }));
+    result = { uploadId, key, parts };
+  }
+
+  return result;
+}
+
+/**
+ * POST /databanks/:databankId/uploads/batch
+ * Initiate several uploads in one request (same per-item options as POST /uploads)
+ */
+databanksRoutes.post(
+  `/:databankId/${ApiPaths.DATABANK_UPLOADS}/batch`,
+  authenticate,
+  authorize([UserRole.PROVIDER]),
+  checkIsOwner,
+  validateBody(batchInitiateUploadSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const databankId = req.params.databankId;
+    const { uploads } = req[VALIDATED_BODY];
+
+    logger.info(`Batch initiate upload request: databankId=${databankId}, count=${uploads.length}`);
+
+    if (!databankId) {
+      throw new ValidationError('Databank ID is required');
+    }
+
+    const results = await Promise.all(
+      uploads.map((item: Parameters<typeof initiateOneUpload>[1]) => initiateOneUpload(databankId, item))
+    );
+    res.json(buildResponse({ uploads: results }));
+  })
+);
+
+/**
  * POST /databanks/:databankId/uploads
  * Initiate a multipart upload to a databank
  */
@@ -431,42 +496,17 @@ databanksRoutes.post(
   validateBody(initiateUploadSchema),
   asyncHandler(async (req: Request, res: Response) => {
     const databankId = req.params.databankId;
-    const { key, numParts, contentType } = req[VALIDATED_BODY];
-    
+    const { key, numParts } = req[VALIDATED_BODY];
+
     logger.info(`Initiate upload request: key=${key}, databankId=${databankId}, numParts=${numParts}`);
-    
+
     // Validate the databankId parameter
     if (!databankId) {
       throw new ValidationError('Databank ID is required');
     }
-    
+
     try {
-      // Initiate the multipart upload
-      // Ensure key is a valid string
-      if (!key) {
-        throw new ValidationError('Key is required');
-      }
-      
-      const { uploadId, presignedUrls } = await multipartUploadService.initiateUpload(
-        key!, 
-        databankId, 
-        numParts, 
-        contentType || 'application/octet-stream' // Provide default content type if undefined
-      );
-      
-      // Format the response with presigned URLs for each part
-      const parts = presignedUrls.map((url, index) => ({
-        partNumber: index + 1,
-        presignedUrl: url
-      }));
-      
-      const response = buildResponse({
-        uploadId,
-        key,
-        parts
-      });
-      
-      res.json(response);
+      res.json(buildResponse(await initiateOneUpload(databankId, req[VALIDATED_BODY])));
     } catch (error) {
       // Handle validation errors specifically for file type validation
       if (error instanceof ValidationError && 
@@ -500,7 +540,7 @@ databanksRoutes.put(
     const databankId = req.params.databankId;
     const uploadId = req.params.uploadId;
     const { key, parts } = req[VALIDATED_BODY];
-    
+
     logger.info(`Complete upload request: key=${key}, uploadId=${uploadId}, databankId=${databankId}, parts=${parts.length}`);
     
     // Validate the databankId parameter
@@ -531,7 +571,7 @@ databanksRoutes.put(
         databankId, 
         normalizedParts
       );
-      
+
       const result = {
         message: "Upload completed successfully",
         key: uploadKey,

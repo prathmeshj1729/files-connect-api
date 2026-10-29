@@ -68,6 +68,8 @@ export interface StorageRepositoryInterface {
 
   // Presigned URL operations
   createPresignedUrl(key: string, expiresIn?: number): Promise<string>;
+  /** Optional: single-PUT upload URL to the final key (GCS only) */
+  createPresignedUploadUrl?(key: string, expiresIn?: number): Promise<string>;
 
   // Utility
   getClient(): any;
